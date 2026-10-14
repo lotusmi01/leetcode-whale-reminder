@@ -19,6 +19,7 @@
 import json
 import os
 import random
+import sys
 import threading
 import time
 import webbrowser
@@ -30,7 +31,11 @@ try:
 except Exception:
     winsound = None
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# 打包成 exe 后：资源 / 配置放在 exe 同目录；源码运行时放在脚本目录
+if getattr(sys, "frozen", False):
+    APP_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 MASCOT_PATH = os.path.join(APP_DIR, "whale_girl.png")
 MASCOT_FLIP_PATH = os.path.join(APP_DIR, "whale_girl_flip.png")

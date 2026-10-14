@@ -4,3 +4,8 @@ config.json
 # Python 缓存
 __pycache__/
 *.pyc
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec
