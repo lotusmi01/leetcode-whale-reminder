@@ -1,0 +1,14 @@
+# 自动生成的配置（含本机窗口位置等个人信息）
+config.json
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 第三方素材（版权：来自 DeepSeek 小鲸鱼插件，仅供运行该插件使用，不随仓库再分发）
+# 鲸鱼娘形象：请用 convert_mascot.py 从你自己的 DSniang1.png 生成
+whale_girl.png
+whale_girl_flip.png
+whale_girl.ico
+# 音效：来自 DeepSeek-Balance-Whale-Widget 插件的 assets/ 目录
+*.mp3
