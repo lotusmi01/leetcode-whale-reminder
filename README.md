@@ -75,17 +75,11 @@
 }
 ```
 
-## 关于素材（版权说明）
+## 许可与素材
 
-本仓库**只包含代码**，不包含以下第三方素材（来自 [DeepSeek 小鲸鱼插件](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)，其授权为「仅供运行该插件使用、不授予再许可」，已加入 `.gitignore`）：
-
-- 鲸鱼娘形象 `whale_girl.png`（及镜像图 `whale_girl_flip.png`、图标 `whale_girl.ico`）
-- 音效 `Ya1.mp3 / Ya2.mp3 / D1.mp3 / D2.mp3`
-
-**自行获取素材**（没有素材时浮窗仍可用：用内置矢量鲸鱼、点击音效自动静音）：
-
-1. 鲸鱼娘图：准备你自己的透明底 PNG，用 `转换形象.bat` 生成 `whale_girl.png`，再 `python make_assets.py` 生成镜像图与图标。
-2. 音效：从上述插件仓库的 `assets/` 目录复制 `Ya1.mp3 / Ya2.mp3 / D1.mp3 / D2.mp3` 到本项目目录。
+- **代码**：本项目自有代码按 [**PolyForm Noncommercial License 1.0.0**](LICENSE) 授权——可自由使用 / 修改 / 分享，但**不得用于商业用途**（注意：该许可含非商业条款，不属于 OSI 定义的「开源」许可）。
+- **第三方素材**：仓库中的鲸鱼娘图片（`whale_girl*.png` / `.ico`）与音效（`*.mp3`）来自 [DeepSeek 小鲸鱼插件](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)，**不在本项目 LICENSE 覆盖范围内**。其来源、原作者许可范围、非官方声明与 takedown 方式详见 **[NOTICE.md](NOTICE.md)**。
+- 本项目是个人学习性质的第三方项目，与 DeepSeek / DSH / 该插件作者均**无隶属关系**。
 
 ## 文件清单
 
