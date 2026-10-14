@@ -18,6 +18,7 @@
 
 import json
 import os
+import queue
 import random
 import sys
 import threading
@@ -295,6 +296,7 @@ class WhaleReminder:
         self._last_phrase = None
         self._speech_bubble = None
         self._toast = None
+        self._reminder_q = queue.Queue()
         self._w = W
         self._h = H
         self._shown = True
@@ -616,8 +618,10 @@ class WhaleReminder:
 
     # ---------------- 每日提醒 ----------------
     def start_reminder_thread(self):
-        t = threading.Thread(target=self._reminder_loop, daemon=True)
-        t.start()
+        # 子线程只负责「判断时间 + 入队」，真正弹气泡由主线程做（Tkinter 非线程安全，
+        # 之前直接在子线程里 root.after(...) 导致提醒不显示）。
+        threading.Thread(target=self._reminder_loop, daemon=True).start()
+        self.root.after(500, self._drain_reminders)
 
     def _reminder_loop(self):
         while not self._stop:
@@ -625,13 +629,37 @@ class WhaleReminder:
                 now = datetime.now()
                 hm = now.strftime("%H:%M")
                 today = now.strftime("%Y-%m-%d")
-                if hm == self.cfg["remind_time"] and self.cfg["reminded_date"] != today:
+                target = str(self.cfg.get("remind_time") or "20:00")
+                # 「到点」或「已过点且当天还没提醒过」都触发：
+                # 这样电脑休眠 / 开机晚了也不会漏掉当天的提醒。
+                if hm >= target and self.cfg.get("reminded_date") != today:
                     self.cfg["reminded_date"] = today
-                    self.save_config()
-                    self.root.after(0, self.fire_reminder)
+                    try:
+                        self.save_config()
+                    except Exception:
+                        pass
+                    self._reminder_q.put(True)
             except Exception:
                 pass
-            time.sleep(15)
+            time.sleep(10)
+
+    def _drain_reminders(self):
+        """在主线程消费提醒队列（线程安全）。"""
+        if self._stop:
+            return
+        while True:
+            try:
+                self._reminder_q.get_nowait()
+            except Exception:
+                break
+            try:
+                self.fire_reminder()
+            except Exception:
+                pass
+        try:
+            self.root.after(1000, self._drain_reminders)
+        except Exception:
+            pass
 
     def fire_reminder(self, manual=False):
         if winsound is not None:
