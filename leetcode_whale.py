@@ -294,6 +294,7 @@ class WhaleReminder:
         self._moved = False
         self._last_phrase = None
         self._speech_bubble = None
+        self._toast = None
         self._w = W
         self._h = H
         self._shown = True
@@ -408,6 +409,7 @@ class WhaleReminder:
             y = self.root.winfo_y() + dy
             self.root.geometry(f"+{x}+{y}")
             self._press = (e.x_root, e.y_root)
+            self._follow_toast(x, y)
 
     def on_release(self, e):
         moved = self._moved
@@ -479,12 +481,14 @@ class WhaleReminder:
         def step(i):
             if i > steps:
                 self.root.geometry(f"+{tx}+{ty}")
+                self._follow_toast(tx, ty)
                 return
             t = i / steps
             e = t * t * (3 - 2 * t)  # smoothstep
             x = round(x0 + (tx - x0) * e)
             y = round(y0 + (ty - y0) * e)
             self.root.geometry(f"+{x}+{y}")
+            self._follow_toast(x, y)
             self.root.after(interval, lambda: step(i + 1))
 
         step(1)
@@ -642,40 +646,60 @@ class WhaleReminder:
         y0 = self.root.winfo_y()
         if step >= max_step:
             self.root.geometry(f"+{self.root.winfo_x()}+{y0}")
+            self._follow_toast(self.root.winfo_x(), y0)
             return
         amp = 14
         dy = -amp if step % 2 == 0 else amp
         self.root.geometry(f"+{self.root.winfo_x()}+{y0 + dy}")
+        self._follow_toast(self.root.winfo_x(), y0 + dy)
         self.root.after(120, lambda: self.bounce(step + 1, max_step))
 
     # ---------------- 气泡 / 提醒弹窗 ----------------
     def show_speech(self, text, seconds=5):
         self._close_speech()
         top = self._make_bubble(text, 0, 0, seconds=seconds)
-        top.update_idletasks()
+        self._place_above_whale(top)
+        self._speech_bubble = top
+
+    def _place_above_whale(self, top, wx=None, wy=None):
+        """把气泡水平居中放到浮窗正上方（当前显示器内）；上方放不下则放下方。"""
+        if wx is None:
+            wx = self.root.winfo_x()
+        if wy is None:
+            wy = self.root.winfo_y()
         bw = top.winfo_reqwidth()
         bh = top.winfo_reqheight()
-        ww = self.root.winfo_width()
-        wx = self.root.winfo_x()
-        wy = self.root.winfo_y()
-        x = (wx + ww // 2) - bw // 2          # 水平居中于浮窗
-        y = wy - bh - 8                       # 浮窗正上方
-        m = monitor_work_area(wx + ww / 2.0, wy + self.root.winfo_height() / 2.0)
+        ww = self._w
+        wh = self._h
+        x = (wx + ww // 2) - bw // 2
+        y = wy - bh - 8
+        m = monitor_work_area(wx + ww / 2.0, wy + wh / 2.0)
         if m:
             ml, mt, mr, mb = m
             x = max(ml, min(x, mr - bw))
             if y < mt:
-                y = wy + self.root.winfo_height() + 8   # 上方放不下则放下方
+                y = wy + wh + 8          # 上方放不下则放到浮窗下方
             y = max(mt, min(y, mb - bh))
         else:
             sw = self.root.winfo_screenwidth()
             sh = self.root.winfo_screenheight()
             x = max(0, min(x, sw - bw))
             if y < 0:
-                y = wy + self.root.winfo_height() + 8
+                y = wy + wh + 8
             y = max(0, min(y, sh - bh))
         top.geometry(f"+{x}+{y}")
-        self._speech_bubble = top
+
+    def _follow_toast(self, wx=None, wy=None):
+        """浮窗移动时让提醒气泡跟随（可传入浮窗新坐标，避免读到尚未生效的位置）。"""
+        if self._toast is None:
+            return
+        try:
+            if self._toast.winfo_exists():
+                self._place_above_whale(self._toast, wx, wy)
+            else:
+                self._toast = None
+        except Exception:
+            self._toast = None
 
     def _close_speech(self):
         if getattr(self, "_speech_bubble", None) is not None:
@@ -690,22 +714,8 @@ class WhaleReminder:
             self.open_leetcode()
 
         top = self._make_bubble(text, 0, 0, seconds=seconds, on_click=click, topmost=True)
-        top.update_idletasks()
-        w = top.winfo_reqwidth()
-        h = top.winfo_reqheight()
-        wx = self.root.winfo_x() + self.root.winfo_width() / 2.0
-        wy = self.root.winfo_y() + self.root.winfo_height() / 2.0
-        m = monitor_work_area(wx, wy)
-        if m:
-            ml, mt, mr, mb = m
-            x = max(ml, min(mr - w - 30, mr - w))
-            y = max(mt, min(mb - h - 70, mb - h))
-        else:
-            sw = self.root.winfo_screenwidth()
-            sh = self.root.winfo_screenheight()
-            x = sw - w - 30
-            y = sh - h - 70
-        top.geometry(f"+{x}+{y}")
+        self._toast = top
+        self._place_above_whale(top)
         return top
 
     def _make_bubble(self, text, x, y, seconds=6, on_click=None, topmost=False):
@@ -726,9 +736,18 @@ class WhaleReminder:
         y = max(0, min(y, sh - h))
         top.geometry(f"+{x}+{y}")
         if on_click:
-            for wdg in (top, lbl):
-                wdg.config(cursor="hand2")
-                wdg.bind("<Button-1>", lambda e: on_click())
+            # 只绑到 Label 上：Tk 的 bindtags 会让 Label 的点击再冒泡到 Toplevel，
+            # 若两处都绑就会触发两次（曾导致点一次开两个力扣标签）。
+            lbl.config(cursor="hand2")
+
+            def _on_click(_e):
+                try:
+                    top.destroy()      # 点击后立即关掉气泡
+                except Exception:
+                    pass
+                on_click()
+
+            lbl.bind("<Button-1>", _on_click)
 
         def close():
             try:
