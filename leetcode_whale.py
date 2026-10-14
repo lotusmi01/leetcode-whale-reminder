@@ -90,6 +90,7 @@ CLICK_PHRASES = [
 DEFAULT_CONFIG = {
     "remind_time": "20:00",      # 每天提醒时间 HH:MM
     "reminded_date": "",         # 今天是否已提醒（YYYY-MM-DD）
+    "done_date": "",             # 今天是否已打卡（YYYY-MM-DD，勾了就当天不再提醒）
     "url": "https://leetcode.cn/",
     "pos": None,                 # [x, y] 或 null（右下角）
     "sound_on": True,            # 点击音效开关
@@ -297,6 +298,7 @@ class WhaleReminder:
         self._speech_bubble = None
         self._toast = None
         self._reminder_q = queue.Queue()
+        self._fired_minute = None   # 本次运行内已触发提醒的分钟（防同一分钟重复弹）
         self._w = W
         self._h = H
         self._shown = True
@@ -503,9 +505,28 @@ class WhaleReminder:
         self.root.after(130, lambda: self.root.geometry(f"+{x}+{y0}"))     # 复位
 
     def _greet(self):
-        if not self._greeted:
-            self._greeted = True
+        if self._greeted:
+            return
+        self._greeted = True
+        if self._reminder_due():
+            self.root.after(700, self._startup_reminder)
+        else:
             self.show_speech(GREETING, 5)
+
+    def _reminder_due(self):
+        """打开时是否该补提醒：已过提醒时间，且今天还没打卡。"""
+        try:
+            now = datetime.now()
+            if self.cfg.get("done_date") == now.strftime("%Y-%m-%d"):
+                return False
+            return now.strftime("%H:%M") >= str(self.cfg.get("remind_time") or "20:00")
+        except Exception:
+            return False
+
+    def _startup_reminder(self):
+        """每次打开时：只要过了提醒时间就补提醒一次（不看当天是否已提醒过）。"""
+        self._fired_minute = datetime.now().strftime("%H:%M")
+        self.fire_reminder()
 
     def _poll_visibility(self):
         """桌面可见时正常显示；其余时间压到最底层，避免遮挡其它窗口。"""
@@ -521,8 +542,8 @@ class WhaleReminder:
             elif not visible and self._shown:
                 self.root.withdraw()
                 self._shown = False
-            # 保持最底层：拖拽 / 菜单期间不压，避免打断交互
-            if self._shown and self._press is None:
+            # 保持最底层：拖拽 / 菜单 / 提醒气泡显示期间不压，避免打断交互
+            if self._shown and self._press is None and self._toast is None:
                 self.root.lower()
         except Exception:
             pass
@@ -601,7 +622,9 @@ class WhaleReminder:
         self.show_speech("已切换网址 ✅", 3)
 
     def mark_done(self):
-        self.cfg["reminded_date"] = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
+        self.cfg["reminded_date"] = today
+        self.cfg["done_date"] = today     # 打卡后当天不再提醒
         self.save_config()
         self.show_speech("已记录，今天真棒！🎉", 3)
 
@@ -624,20 +647,18 @@ class WhaleReminder:
         self.root.after(500, self._drain_reminders)
 
     def _reminder_loop(self):
+        time.sleep(3)
         while not self._stop:
             try:
                 now = datetime.now()
                 hm = now.strftime("%H:%M")
                 today = now.strftime("%Y-%m-%d")
                 target = str(self.cfg.get("remind_time") or "20:00")
-                # 「到点」或「已过点且当天还没提醒过」都触发：
-                # 这样电脑休眠 / 开机晚了也不会漏掉当天的提醒。
-                if hm >= target and self.cfg.get("reminded_date") != today:
-                    self.cfg["reminded_date"] = today
-                    try:
-                        self.save_config()
-                    except Exception:
-                        pass
+                # 到点触发一次（同一分钟内不重复）；打卡当天不触发
+                if (hm == target
+                        and self._fired_minute != hm
+                        and self.cfg.get("done_date") != today):
+                    self._fired_minute = hm
                     self._reminder_q.put(True)
             except Exception:
                 pass
@@ -667,8 +688,28 @@ class WhaleReminder:
                 winsound.MessageBeep(winsound.MB_ICONASTERISK)
             except Exception:
                 pass
+        self._close_speech()   # 关掉台词气泡，避免和提醒气泡重叠
+        # 提醒期间把浮窗临时提到最高优先级；气泡消失后再沉回最底层
+        try:
+            self.root.attributes("-topmost", True)
+            self.root.lift()
+        except Exception:
+            pass
         self.bounce()
-        self.show_toast("🐳 该刷算法题啦！\n\n点击这里，去力扣开始今天的一题 →")
+        self.show_toast("🐳 该刷算法题啦！\n\n点击这里，去力扣开始今天的一题 →",
+                        on_close=self._toast_closed)
+
+    def _toast_closed(self):
+        """提醒气泡消失后：浮窗恢复非置顶并沉回最底层。"""
+        self._toast = None
+        try:
+            self.root.attributes("-topmost", False)
+        except Exception:
+            pass
+        try:
+            self.root.lower()
+        except Exception:
+            pass
 
     def bounce(self, step=0, max_step=4):
         y0 = self.root.winfo_y()
@@ -737,16 +778,17 @@ class WhaleReminder:
                 pass
             self._speech_bubble = None
 
-    def show_toast(self, text, seconds=60):
+    def show_toast(self, text, seconds=60, on_close=None):
         def click():
             self.open_leetcode()
 
-        top = self._make_bubble(text, 0, 0, seconds=seconds, on_click=click, topmost=True)
+        top = self._make_bubble(text, 0, 0, seconds=seconds, on_click=click,
+                                topmost=True, on_close=on_close)
         self._toast = top
         self._place_above_whale(top)
         return top
 
-    def _make_bubble(self, text, x, y, seconds=6, on_click=None, topmost=False):
+    def _make_bubble(self, text, x, y, seconds=6, on_click=None, topmost=False, on_close=None):
         top = tk.Toplevel(self.root)
         top.overrideredirect(True)
         top.attributes("-topmost", topmost)
@@ -763,25 +805,33 @@ class WhaleReminder:
         x = max(0, min(x, sw - w))
         y = max(0, min(y, sh - h))
         top.geometry(f"+{x}+{y}")
+
+        state = {"closed": False}
+
+        def close():
+            if state["closed"]:
+                return
+            state["closed"] = True
+            try:
+                top.destroy()
+            except Exception:
+                pass
+            if on_close:
+                try:
+                    on_close()
+                except Exception:
+                    pass
+
         if on_click:
             # 只绑到 Label 上：Tk 的 bindtags 会让 Label 的点击再冒泡到 Toplevel，
             # 若两处都绑就会触发两次（曾导致点一次开两个力扣标签）。
             lbl.config(cursor="hand2")
 
             def _on_click(_e):
-                try:
-                    top.destroy()      # 点击后立即关掉气泡
-                except Exception:
-                    pass
+                close()            # 点击后立即关掉气泡
                 on_click()
 
             lbl.bind("<Button-1>", _on_click)
-
-        def close():
-            try:
-                top.destroy()
-            except Exception:
-                pass
 
         top.after(int(seconds * 1000), close)
         return top
